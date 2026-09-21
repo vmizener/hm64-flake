@@ -135,14 +135,13 @@
 
           config = lib.mkIf cfg.enable {
             home.packages = [
-              pkgs.appimage-run
               (syspkgs.sohLauncher { inherit (cfg) datadir; })
             ];
 
             home.activation.shipofharkinian = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               datadir="${cfg.datadir}"
               mkdir -p "$datadir"
-              ln -sfn "${syspkgs.sohAppImage}/soh.appimage" "$datadir/soh.appimage"
+              ln -sfn "${lib.getExe syspkgs.sohAppImage}" "$datadir/soh.appimage"
 
               ${lib.concatMapStringsSep "\n" (path: ''
                 source=${lib.escapeShellArg path}
