@@ -2,8 +2,20 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RELEASE_FILE="$REPO_ROOT/release-linux.nix"
-CURRENT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' "$RELEASE_FILE")
+
+CHECK_ONLY=false
+TARGET_PROJECT=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --check-only)
+      CHECK_ONLY=true
+      ;;
+    *)
+      TARGET_PROJECT="$arg"
+      ;;
+  esac
+done
 
 function ci_output() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -11,12 +23,32 @@ function ci_output() {
   fi
 }
 
+function get_project_info() {
+  local PROJECT_DIR=$1
+  local -n _REPO=$2
+  local -n _CURRENT_VERSION=$3
+
+  if command -v nix &>/dev/null; then
+    local PROJECT_META
+    PROJECT_META=$(
+      nix eval --impure --json --expr \
+        "let p = import \"$PROJECT_DIR\"; in { inherit (p) repo; inherit (p.releaseInfo) version; }"
+    )
+    _REPO=$(echo "$PROJECT_META" | jq -r '.repo')
+    _CURRENT_VERSION=$(echo "$PROJECT_META" | jq -r '.version')
+  else
+    _REPO=$(sed -n 's/.*repo = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/default.nix")
+    _CURRENT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/release-linux.nix")
+  fi
+}
+
 # shellcheck disable=SC2016,SC2288
 function get_latest_version() {
-  local -n _NAME=$1
-  local -n _VERSION=$2
-  local -n _URL=$3
-  local ADDRESS="repos/HarbourMasters/Shipwright/releases/latest"
+  local REPO=$1
+  local -n _NAME=$2
+  local -n _VERSION=$3
+  local -n _URL=$4
+  local ADDRESS="repos/$REPO/releases/latest"
   local QUERY='
     first(.assets[] | select(.name | endswith("-Linux.zip"))) as $asset |
     {
@@ -49,32 +81,49 @@ function get_latest_version() {
   _URL=$(echo "$INFO" | jq -r ".url")
 
   if [ -z "$_VERSION" ] || [ "$_VERSION" = "null" ] || [ -z "$_URL" ] || [ "$_URL" = "null" ]; then
-    echo "Failed to find valid release version or Linux zip asset" >&2
+    echo "Failed to find valid release version or Linux zip asset for $REPO" >&2
     exit 1
   fi
 }
 
-NAME="" VERSION="" URL=""
-get_latest_version NAME VERSION URL
-
-if [ "$VERSION" = "$CURRENT_VERSION" ]; then
-  echo "Repository is up-to-date (${CURRENT_VERSION})."
-  ci_output "has_update" "false"
-  exit 0
+if [[ -n "$TARGET_PROJECT" ]]; then
+  PROJECT_DIRS=("$REPO_ROOT/projects/$TARGET_PROJECT")
+else
+  PROJECT_DIRS=("$REPO_ROOT"/projects/*)
 fi
 
-echo "New release detected: $VERSION ($NAME)"
-ci_output "has_update" "true"
-ci_output "version" "$VERSION"
-ci_output "name" "$NAME"
+ANY_UPDATE=false
 
-# Break early if `--check-only` is passed in
-[[ "${1:-}" == "--check-only" ]] && exit 0
+for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
+  [[ -d "$PROJECT_DIR" ]] || continue
+  PROJECT_NAME=$(basename "$PROJECT_DIR")
+  RELEASE_FILE="$PROJECT_DIR/release-linux.nix"
 
-RAW_HASH=$(nix-prefetch-url --unpack --type sha256 "$URL")
-SRI_HASH=$(nix hash convert --to sri "sha256:$RAW_HASH")
+  REPO="" CURRENT_VERSION=""
+  get_project_info "$PROJECT_DIR" REPO CURRENT_VERSION
 
-cat <<EOF > "$RELEASE_FILE"
+  NAME="" VERSION="" URL=""
+  get_latest_version "$REPO" NAME VERSION URL
+
+  if [ "$VERSION" = "$CURRENT_VERSION" ]; then
+    echo "$PROJECT_NAME is up-to-date (${CURRENT_VERSION})."
+    continue
+  fi
+
+  echo "New release detected for $PROJECT_NAME: $VERSION ($NAME)"
+  ANY_UPDATE=true
+  ci_output "has_update" "true"
+  ci_output "version" "$VERSION"
+  ci_output "name" "$NAME"
+
+  if [[ "$CHECK_ONLY" == true ]]; then
+    continue
+  fi
+
+  RAW_HASH=$(nix-prefetch-url --unpack --type sha256 "$URL")
+  SRI_HASH=$(nix hash convert --to sri "sha256:$RAW_HASH")
+
+  cat <<EOF > "$RELEASE_FILE"
 {
   name = "$NAME";
   version = "$VERSION";
@@ -82,5 +131,10 @@ cat <<EOF > "$RELEASE_FILE"
 }
 EOF
 
-nix fmt "$RELEASE_FILE"
-echo "Updated $RELEASE_FILE to $VERSION ($NAME)."
+  nix fmt "$RELEASE_FILE"
+  echo "Updated $RELEASE_FILE to $VERSION ($NAME)."
+done
+
+if [[ "$ANY_UPDATE" == false ]]; then
+  ci_output "has_update" "false"
+fi
