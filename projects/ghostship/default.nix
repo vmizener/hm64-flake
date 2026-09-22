@@ -1,9 +1,9 @@
 {
-  displayName = "Ship of Harkinian";
-  launcherName = "ShipOfHarkinian";
-  appimageSymlink = "soh.appimage";
+  displayName = "Ghostship";
+  launcherName = "Ghostship";
+  appimageSymlink = "ghostship.appimage";
   releaseInfo = import ./release-linux.nix;
-  repo = "HarbourMasters/Shipwright";
+  repo = "HarbourMasters/Ghostship";
   desktopFile = ./project.desktop;
   iconFile = ./project.png;
   extraPkgs = pkgs: [ pkgs.zenity ];
