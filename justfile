@@ -1,3 +1,8 @@
+# List recipes
+default:
+    just --list
+
+# Run nix formatter
 format:
     nix fmt -- $(fd '^[^.]*\.nix$' .)
 
@@ -9,11 +14,14 @@ check mode="fast": format
         *) echo "Unknown mode: '{{mode}}'. Valid options are: fast, all" >&2; exit 1 ;; \
     esac
 
+# Run fast checks
 check-fast:
     nix flake check --quiet --show-trace
 
+# Run all checks
 check-all:
     nix build ".#all-checks" --no-link -L
 
+# Poll and update new project releases
 update-release flags="":
     ./scripts/update-release.sh {{flags}}
