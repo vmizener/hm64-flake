@@ -1,4 +1,4 @@
-name: "Poll & Update Shipwright Release"
+name: "Poll & Update Releases"
 
 on:
   schedule:
@@ -8,27 +8,30 @@ on:
 
 jobs:
   check-upstream:
-    name: "Check for New Release"
+    name: "Check for New Releases"
     runs-on: ubuntu-latest
     outputs:
       has_update: ${{ steps.check.outputs.has_update }}
-      version: ${{ steps.check.outputs.version }}
-      name: ${{ steps.check.outputs.name }}
+      updates: ${{ steps.check.outputs.updates }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Query upstream GitHub release
+      - name: Query upstream GitHub releases
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/update-release.sh --check-only
 
   update-and-pr:
-    name: "Update & Create Pull Request"
+    name: "Update ${{ matrix.update.project }} & Create Pull Request"
     needs: check-upstream
     if: needs.check-upstream.outputs.has_update == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        update: ${{ fromJson(needs.check-upstream.outputs.updates) }}
     permissions:
       contents: write
       pull-requests: write
@@ -45,7 +48,7 @@ jobs:
       - name: Update release and compute hash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/update-release.sh
+        run: ./scripts/update-release.sh "${{ matrix.update.project }}"
 
       - name: Run fast checks
         run: nix flake check --show-trace
@@ -54,11 +57,12 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ github.token }}
-          commit-message: "chore(release): update to ${{ needs.check-upstream.outputs.version }}"
-          title: "Update to ${{ needs.check-upstream.outputs.version }}"
+          commit-message: "chore(${{ matrix.update.project }}): update to ${{ matrix.update.version }}"
+          title: "Update ${{ matrix.update.project }} to ${{ matrix.update.version }}"
           body: |
             Automated update to upstream release.
-            - **Release name**: `${{ needs.check-upstream.outputs.name }}`
-            - **Version**: `${{ needs.check-upstream.outputs.version }}`
-          branch: "auto-update/soh-${{ needs.check-upstream.outputs.version }}"
+            - **Project**: `${{ matrix.update.project }}`
+            - **Release name**: `${{ matrix.update.name }}`
+            - **Version**: `${{ matrix.update.version }}`
+          branch: "auto-update/${{ matrix.update.project }}-${{ matrix.update.version }}"
           delete-branch: true

@@ -92,7 +92,7 @@ else
   PROJECT_DIRS=("$REPO_ROOT"/projects/*)
 fi
 
-ANY_UPDATE=false
+UPDATES_JSON="[]"
 
 for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
   [[ -d "$PROJECT_DIR" ]] || continue
@@ -111,10 +111,13 @@ for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
   fi
 
   echo "New release detected for $PROJECT_NAME: $VERSION ($NAME)"
-  ANY_UPDATE=true
-  ci_output "has_update" "true"
-  ci_output "version" "$VERSION"
-  ci_output "name" "$NAME"
+  UPDATES_JSON=$(
+    echo "$UPDATES_JSON" | jq -c \
+      --arg project "$PROJECT_NAME" \
+      --arg version "$VERSION" \
+      --arg name "$NAME" \
+      '. + [{project: $project, version: $version, name: $name}]'
+  )
 
   if [[ "$CHECK_ONLY" == true ]]; then
     continue
@@ -135,6 +138,9 @@ EOF
   echo "Updated $RELEASE_FILE to $VERSION ($NAME)."
 done
 
-if [[ "$ANY_UPDATE" == false ]]; then
+if [[ "$UPDATES_JSON" != "[]" ]]; then
+  ci_output "has_update" "true"
+else
   ci_output "has_update" "false"
 fi
+ci_output "updates" "$UPDATES_JSON"
