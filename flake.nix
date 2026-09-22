@@ -23,20 +23,50 @@
     let
       systems = [
         "x86_64-linux"
-        "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      pkgsFor = system: nixpkgs.legacyPackages.${system};
 
-      mkPackages =
+      projectNames = builtins.attrNames (
+        nixpkgs.lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./projects)
+      );
+
+      mkAllPackages =
         system:
-        import ./packages.nix {
-          pkgs = import nixpkgs { inherit system; };
-        };
+        let
+          pkgs = pkgsFor system;
+          mkAppImage = pkgs.callPackage ./lib/mk-appimage.nix { };
+          mkLauncher = pkgs.callPackage ./lib/mk-launcher.nix { };
+        in
+        builtins.foldl' (
+          acc: pname:
+          let
+            project = import (./projects + "/${pname}");
+          in
+          acc
+          // {
+            "${pname}-appimage" = mkAppImage {
+              inherit pname;
+              inherit (project)
+                releaseInfo
+                repo
+                ;
+              extraPkgs = project.extraPkgs or (_: [ ]);
+            };
+            "${pname}-launcher" = mkLauncher {
+              inherit pname;
+              inherit (project)
+                launcherName
+                appimageSymlink
+                ;
+            };
+          }
+        ) { } projectNames;
       mkTests =
         system:
         import ./tests {
           inherit home-manager self;
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
         };
       mkGitHooks =
         system:
@@ -53,19 +83,18 @@
       packages = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
-          syspkgs = mkPackages system;
+          pkgs = pkgsFor system;
+          projectPackages = mkAllPackages system;
           tests = mkTests system;
         in
-        rec {
-          default = shipofharkinian-appimage;
-          shipofharkinian-appimage = syspkgs.sohAppImage;
-          shipofharkinian-launcher = syspkgs.sohLauncher { };
+        projectPackages
+        // {
+          default = projectPackages.shipofharkinian-appimage;
 
           all-checks = pkgs.linkFarm "all-checks" (
             tests.all
             // {
-              package-builds = syspkgs.sohLauncher { };
+              package-builds = pkgs.linkFarm "package-builds" projectPackages;
             }
           );
         }
@@ -74,13 +103,14 @@
       checks = forAllSystems (
         system:
         let
-          syspkgs = mkPackages system;
+          pkgs = pkgsFor system;
+          projectPackages = mkAllPackages system;
           tests = mkTests system;
           gitHooks = mkGitHooks system;
         in
         {
           pre-commit-check = gitHooks;
-          package-builds = syspkgs.sohLauncher { };
+          package-builds = pkgs.linkFarm "package-builds" projectPackages;
         }
         // tests.fast
       );
@@ -88,7 +118,7 @@
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = pkgsFor system;
           gitHooks = mkGitHooks system;
         in
         {
@@ -99,64 +129,21 @@
         }
       );
 
-      formatter = forAllSystems (system: (import nixpkgs { inherit system; }).nixfmt);
+      formatter = forAllSystems (system: (pkgsFor system).nixfmt);
 
-      homeManagerModules.default =
-        {
-          config,
-          lib,
-          pkgs,
-          ...
-        }:
+      homeManagerModules =
         let
-          cfg = config.programs.shipofharkinian;
-          syspkgs = mkPackages pkgs.stdenv.hostPlatform.system;
+          mkModule =
+            pname:
+            import ./lib/hm-module.nix {
+              inherit self pname;
+              projectDir = ./projects + "/${pname}";
+            };
         in
-        {
-          options.programs.shipofharkinian = {
-            enable = lib.mkEnableOption "Ship of Harkinian";
-            datadir = lib.mkOption {
-              type = lib.types.str;
-              default = "${config.xdg.dataHome}/shipofharkinian";
-              defaultText = "$XDG_DATA_HOME/shipofharkinian";
-              description = ''
-                Directory to write SoH assets (e.g. the AppImage).
-              '';
-            };
-            gamepaths = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [ ];
-              description = ''
-                Absolute paths to legal image dumps to include with SoH.
-                Images are copied into the SoH data directory.
-              '';
-            };
-          };
-
-          config = lib.mkIf cfg.enable {
-            home.packages = [
-              (syspkgs.sohLauncher { inherit (cfg) datadir; })
-            ];
-
-            home.activation.shipofharkinian = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              datadir="${cfg.datadir}"
-              mkdir -p "$datadir"
-              ln -sfn "${lib.getExe syspkgs.sohAppImage}" "$datadir/soh.appimage"
-
-              ${lib.concatMapStringsSep "\n" (path: ''
-                source=${lib.escapeShellArg path}
-                target=$datadir/$(basename "$source")
-                if [ ! -f "$source" ]; then
-                  echo "Image path does not exist: $source" >&2
-                  exit 1
-                fi
-                ln -sfn "$source" "$target"
-              '') cfg.gamepaths}
-            '';
-            xdg.dataFile = {
-              "applications/shipofharkinian.desktop".source = ./soh.desktop;
-              "icons/hicolor/512x512/apps/shipofharkinian.png".source = ./soh.png;
-            };
+        nixpkgs.lib.genAttrs projectNames mkModule
+        // {
+          default = {
+            imports = map mkModule projectNames;
           };
         };
     };

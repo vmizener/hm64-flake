@@ -14,7 +14,7 @@ let
           homeDirectory = "/home/test";
           stateVersion = "25.05";
         };
-        programs.shipofharkinian = {
+        programs.harbourmasters.shipofharkinian = {
           enable = true;
           gamepaths = [
             "/home/test/image1.z64"
