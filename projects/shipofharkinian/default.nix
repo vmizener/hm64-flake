@@ -5,6 +5,10 @@
   releaseInfo = import ./release-linux.nix;
   repo = "HarbourMasters/Shipwright";
   desktopFile = ./project.desktop;
-  iconFile = ./project.png;
+  iconFile = ./icon.png;
+  steamArtwork = {
+    icon = ./icon.png;
+    logo = ./logo.png;
+  };
   extraPkgs = pkgs: [ pkgs.zenity ];
 }

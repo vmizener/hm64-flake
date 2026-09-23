@@ -133,18 +133,14 @@
 
       homeManagerModules =
         let
-          mkModule =
-            pname:
-            import ./lib/hm-module.nix {
-              inherit self pname;
-              projectDir = ./projects + "/${pname}";
-            };
-        in
-        nixpkgs.lib.genAttrs projectNames mkModule
-        // {
-          default = {
-            imports = map mkModule projectNames;
+          hmModule = import ./lib/hm-module.nix {
+            inherit self;
+            projectsDir = ./projects;
           };
+        in
+        nixpkgs.lib.genAttrs projectNames (_: hmModule)
+        // {
+          default = hmModule;
         };
     };
 }

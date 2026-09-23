@@ -5,6 +5,9 @@
   releaseInfo = import ./release-linux.nix;
   repo = "HarbourMasters/Ghostship";
   desktopFile = ./project.desktop;
-  iconFile = ./project.png;
+  iconFile = ./icon.png;
+  steamArtwork = {
+    icon = ./icon.png;
+  };
   extraPkgs = pkgs: [ pkgs.zenity ];
 }

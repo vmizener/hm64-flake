@@ -25,10 +25,12 @@ rec {
   fast = {
     evalBasic = mkEvalTest ./eval-basic.nix;
     evalCustomDatadir = mkEvalTest ./eval-custom-datadir.nix;
+    evalSteam = mkEvalTest ./eval-steam.nix;
   };
 
   vm = {
     vmBasic = mkVmTest ./vm-basic.nix;
+    vmSteam = mkVmTest ./vm-steam.nix;
   };
 
   all = fast // vm;
