@@ -42,46 +42,72 @@ function get_project_info() {
   fi
 }
 
-# shellcheck disable=SC2016,SC2288
+# shellcheck disable=SC2016
+function fetch_asset() {
+  local RELEASE_JSON=$1
+  local SUFFIX=$2
+  local QUERY='
+    first(.assets[] | select(.name | test($suffix + "$"; "i"))) as $asset |
+    {
+      name: ($asset.name | sub($suffix + "$"; ""; "i")),
+      version: .tag_name,
+      asset: $asset.name,
+      url: $asset.browser_download_url
+    }
+  '
+  echo "$RELEASE_JSON" | jq -r --arg suffix "$SUFFIX" "$QUERY"
+}
+
+# shellcheck disable=SC2288
 function get_latest_version() {
   local REPO=$1
   local -n _NAME=$2
   local -n _VERSION=$3
-  local -n _URL=$4
+  local -n _ASSET=$4
+  local -n _URL=$5
   local ADDRESS="repos/$REPO/releases/latest"
-  local QUERY='
-    first(.assets[] | select(.name | endswith("-Linux.zip"))) as $asset |
-    {
-      name: ($asset.name | sub("-Linux\\.zip$"; "")),
-      version: .tag_name,
-      url: $asset.browser_download_url
-    }
-  '
-  local INFO
+  local RELEASE_JSON
   if command -v gh &>/dev/null; then
-    INFO=$(gh api "$ADDRESS" | jq -r "$QUERY")
+    RELEASE_JSON=$(gh api "$ADDRESS")
   elif command -v , &>/dev/null; then
-    INFO=$(, gh api "$ADDRESS" | jq -r "$QUERY")
+    RELEASE_JSON=$(, gh api "$ADDRESS")
   elif command -v curl &>/dev/null; then
     local AUTH_HEADERS=()
     [[ -n "${GH_TOKEN:-}" ]] && AUTH_HEADERS=(-H "Authorization: Bearer ${GH_TOKEN}")
-    INFO=$(
+    RELEASE_JSON=$(
       curl -sSL "${AUTH_HEADERS[@]}" \
         -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/$ADDRESS" \
-      | jq -r "$QUERY"
+        "https://api.github.com/$ADDRESS"
     )
   else
     echo "Failed to get remote version: neither gh, ',', nor curl found" >&2
     exit 1
   fi
 
+  local ASSETS
+  ASSETS=$(echo "$RELEASE_JSON" | jq -r '.assets[].name')
+
+  local INFO
+  case "${ASSETS,,}" in
+    *-linux.zip*)
+      INFO=$(fetch_asset "$RELEASE_JSON" "-Linux\\.zip")
+      ;;
+    *.appimage*)
+      INFO=$(fetch_asset "$RELEASE_JSON" "\\.appimage")
+      ;;
+    *)
+      echo "Failed to find valid Linux release asset for $REPO" >&2
+      exit 1
+      ;;
+  esac
+
   _NAME=$(echo "$INFO" | jq -r ".name")
   _VERSION=$(echo "$INFO" | jq -r ".version")
+  _ASSET=$(echo "$INFO" | jq -r ".asset")
   _URL=$(echo "$INFO" | jq -r ".url")
 
   if [ -z "$_VERSION" ] || [ "$_VERSION" = "null" ] || [ -z "$_URL" ] || [ "$_URL" = "null" ]; then
-    echo "Failed to find valid release version or Linux zip asset for $REPO" >&2
+    echo "Failed to find valid release version or Linux asset for $REPO" >&2
     exit 1
   fi
 }
@@ -102,8 +128,8 @@ for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
   REPO="" CURRENT_VERSION=""
   get_project_info "$PROJECT_DIR" REPO CURRENT_VERSION
 
-  NAME="" VERSION="" URL=""
-  get_latest_version "$REPO" NAME VERSION URL
+  NAME="" VERSION="" ASSET="" URL=""
+  get_latest_version "$REPO" NAME VERSION ASSET URL
 
   if [ "$VERSION" = "$CURRENT_VERSION" ]; then
     echo "$PROJECT_NAME is up-to-date (${CURRENT_VERSION})."
@@ -123,13 +149,19 @@ for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
     continue
   fi
 
-  RAW_HASH=$(nix-prefetch-url --unpack --type sha256 "$URL")
+  PREFETCH_FLAGS=(--type sha256)
+  if [[ "${ASSET,,}" == *.zip ]]; then
+    PREFETCH_FLAGS+=(--unpack)
+  fi
+
+  RAW_HASH=$(nix-prefetch-url "${PREFETCH_FLAGS[@]}" "$URL")
   SRI_HASH=$(nix hash convert --to sri "sha256:$RAW_HASH")
 
   cat <<EOF > "$RELEASE_FILE"
 {
   name = "$NAME";
   version = "$VERSION";
+  asset = "$ASSET";
   hash = "$SRI_HASH";
 }
 EOF
