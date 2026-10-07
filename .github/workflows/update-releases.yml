@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         update: ${{ fromJson(needs.check-upstream.outputs.updates) }}
     permissions:
@@ -54,6 +55,7 @@ jobs:
         run: nix flake check --show-trace
 
       - name: Create Pull Request
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ github.token }}
@@ -66,3 +68,10 @@ jobs:
             - **Version**: `${{ matrix.update.version }}`
           branch: "auto-update/${{ matrix.update.project }}-${{ matrix.update.version }}"
           delete-branch: true
+
+      - name: Merge Pull Request
+        if: steps.cpr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr merge "${{ steps.cpr.outputs.pull-request-number }}" --rebase --delete-branch
+
