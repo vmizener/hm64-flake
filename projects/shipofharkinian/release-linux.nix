@@ -1,5 +1,6 @@
 {
-  name = "SoH-Ackbar-Delta";
-  version = "9.2.3";
-  hash = "sha256-hlu5j8ZI+oml2xgnbQRh+a+lMC1hsZMyN4cExilIa7g=";
+  name = "soh";
+  version = "9.3.0";
+  asset = "soh.appimage";
+  hash = "sha256-hQe7cEE+Ew5FLrr18Va/14AT7gFENkt5aGgOjPBkoPo=";
 }
