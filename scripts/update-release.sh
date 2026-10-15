@@ -27,18 +27,26 @@ function get_project_info() {
   local PROJECT_DIR=$1
   local -n _REPO=$2
   local -n _CURRENT_VERSION=$3
+  local -n _CURRENT_ASSET=$4
 
   if command -v nix &>/dev/null; then
     local PROJECT_META
     PROJECT_META=$(
       nix eval --impure --json --expr \
-        "let p = import \"$PROJECT_DIR\"; in { inherit (p) repo; inherit (p.releaseInfo) version; }"
+        "let p = import \"$PROJECT_DIR\"; in { inherit (p) repo; inherit (p.releaseInfo) version; asset = p.releaseInfo.asset or \"\${p.releaseInfo.name}-Linux.zip\"; }"
     )
     _REPO=$(echo "$PROJECT_META" | jq -r '.repo')
     _CURRENT_VERSION=$(echo "$PROJECT_META" | jq -r '.version')
+    _CURRENT_ASSET=$(echo "$PROJECT_META" | jq -r '.asset')
   else
     _REPO=$(sed -n 's/.*repo = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/default.nix")
     _CURRENT_VERSION=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/release-linux.nix")
+    _CURRENT_ASSET=$(sed -n 's/.*asset = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/release-linux.nix")
+    if [[ -z "$_CURRENT_ASSET" ]]; then
+      local CURRENT_NAME
+      CURRENT_NAME=$(sed -n 's/.*name = "\([^"]*\)".*/\1/p' "$PROJECT_DIR/release-linux.nix")
+      _CURRENT_ASSET="${CURRENT_NAME}-Linux.zip"
+    fi
   fi
 }
 
@@ -125,13 +133,13 @@ for PROJECT_DIR in "${PROJECT_DIRS[@]}"; do
   PROJECT_NAME=$(basename "$PROJECT_DIR")
   RELEASE_FILE="$PROJECT_DIR/release-linux.nix"
 
-  REPO="" CURRENT_VERSION=""
-  get_project_info "$PROJECT_DIR" REPO CURRENT_VERSION
+  REPO="" CURRENT_VERSION="" CURRENT_ASSET=""
+  get_project_info "$PROJECT_DIR" REPO CURRENT_VERSION CURRENT_ASSET
 
   NAME="" VERSION="" ASSET="" URL=""
   get_latest_version "$REPO" NAME VERSION ASSET URL
 
-  if [ "$VERSION" = "$CURRENT_VERSION" ]; then
+  if [ "$VERSION" = "$CURRENT_VERSION" ] && [ "$ASSET" = "$CURRENT_ASSET" ]; then
     echo "$PROJECT_NAME is up-to-date (${CURRENT_VERSION})."
     continue
   fi
